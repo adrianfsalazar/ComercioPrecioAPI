@@ -13,7 +13,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO_OWNER = os.getenv("REPO_OWNER")
 REPO_NAME = os.getenv("REPO_NAME")
-FILE_PATH = "tasas_cambio.json"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -133,52 +132,56 @@ class ExchangeScraper:
 
 class GitHubStorage:
     def __init__(self):
-        self.api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{FILE_PATH}"
+        self.base_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/"
         self.headers = {
             "Authorization": f"Bearer {GITHUB_TOKEN}",
             "Accept": "application/vnd.github.v3+json"
         }
 
-    def get_file(self):
+    def get_file(self, file_name):
         sha = None
+        api_url = self.base_url + file_name
         try:
-            r = requests.get(self.api_url, headers=self.headers)
+            r = requests.get(api_url, headers=self.headers)
             if r.status_code == 200:
                 content = r.json()
                 sha = content.get('sha')
                 file_content = base64.b64decode(content['content']).decode('utf-8')
                 return json.loads(file_content), sha
             elif r.status_code == 404:
-                print("El archivo no existe aún.")
+                print(f"El archivo {file_name} no existe aún.")
                 return None, None
         except json.JSONDecodeError:
-            print("JSON corrupto. Se sobrescribirá.")
+            print(f"JSON corrupto en {file_name}. Se sobrescribirá.")
             return None, sha
         except Exception as e:
-            print(f"Error GitHub: {e}")
+            print(f"Error leyendo GitHub ({file_name}): {e}")
         return None, sha
 
-    def update_file(self, content_dict, sha=None):
-        content_str = json.dumps(content_dict, indent=2)
+    def update_file(self, file_name, content_data, sha=None, commit_message="Auto-update"):
+        api_url = self.base_url + file_name
+        content_str = json.dumps(content_data, indent=2)
         content_b64 = base64.b64encode(content_str.encode('utf-8')).decode('utf-8')
         data = {
-            "message": "Auto-update: Tasas + Promedios (Debug)",
+            "message": commit_message,
             "content": content_b64
         }
         if sha:
             data["sha"] = sha
             
-        r = requests.put(self.api_url, headers=self.headers, json=data)
+        r = requests.put(api_url, headers=self.headers, json=data)
         if r.status_code in [200, 201]:
-            print("GitHub actualizado correctamente.")
+            print(f"✅ Archivo {file_name} actualizado correctamente.")
         else:
-            print(f"Error actualizando GitHub: {r.text}")
+            print(f"❌ Error actualizando {file_name}: {r.text}")
 
 def main():
     storage = GitHubStorage()
-    cached_data, sha = storage.get_file()
-    
     current_time = time.time()
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # === PARTE 1: TASAS ACTUALES (tasas_cambio.json) ===
+    cached_data, sha_actual = storage.get_file("tasas_cambio.json")
     
     scraper = ExchangeScraper()
     scraper.get_bcv_rates()
@@ -191,12 +194,50 @@ def main():
     if cached_data:
         keys_to_check = ["dolar", "euro", "usdt", "usdt_promedio_compra", "usdt_promedio_venta"]
         for key in keys_to_check:
-            # Si el valor nuevo es None o 0, y tenemos dato viejo, lo usamos
             if not scraper.data.get(key) and cached_data.get(key):
                 print(f"⚠️ Recuperando {key} de caché...")
                 scraper.data[key] = cached_data[key]
 
-    storage.update_file(scraper.data, sha)
+    storage.update_file("tasas_cambio.json", scraper.data, sha_actual, "Auto-update: Tasas Actuales")
+
+    # === PARTE 2: HISTÓRICO BCV (base_datos_bcv.json) ===
+    # Solo procedemos si el scraping del BCV fue exitoso
+    if scraper.data["dolar"] and scraper.data["euro"]:
+        hist_data, sha_hist = storage.get_file("base_datos_bcv.json")
+        
+        # Comprobar si el histórico existe y tiene registros
+        if hist_data and isinstance(hist_data, list) and len(hist_data) > 0:
+            last_entry = hist_data[-1]  # Extraemos el último registro
+            last_dolar = last_entry.get("dolar")
+            last_euro = last_entry.get("euro")
+            
+            # Condición: ¿El precio extraído es diferente al último guardado?
+            if scraper.data["dolar"] != last_dolar or scraper.data["euro"] != last_euro:
+                print(f"¡Nuevas tasas detectadas! Dólar: {scraper.data['dolar']} | Euro: {scraper.data['euro']}")
+                
+                new_entry = {
+                    "fecha": current_date,
+                    "dolar": scraper.data["dolar"],
+                    "euro": scraper.data["euro"],
+                    "usdt": None  # Lo mantenemos en None según la base de datos
+                }
+                
+                hist_data.append(new_entry)
+                storage.update_file("base_datos_bcv.json", hist_data, sha_hist, f"Auto-update: Histórico BCV añadido ({current_date})")
+            else:
+                print("Las tasas del BCV no han cambiado. Histórico intacto.")
+                
+        elif hist_data is None:
+            # Si el archivo histórico no existe en GitHub, lo creamos con el primer dato
+            print("Archivo histórico no encontrado. Creando uno nuevo...")
+            new_entry = {
+                "fecha": current_date,
+                "dolar": scraper.data["dolar"],
+                "euro": scraper.data["euro"],
+                "usdt": None
+            }
+            storage.update_file("base_datos_bcv.json", [new_entry], sha_hist, "Inicializando base_datos_bcv.json")
+
     return scraper.data
 
 if __name__ == "__main__":
