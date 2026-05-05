@@ -3,6 +3,7 @@ import json
 import time
 import base64
 import requests
+import re
 from bs4 import BeautifulSoup
 from datetime import datetime
 import urllib3
@@ -28,6 +29,7 @@ class ExchangeScraper:
             "usdt": None,
             "usdt_promedio_compra": None,
             "usdt_promedio_venta": None,
+            "fecha_bcv": None,
             "timestamp": 0,
             "human_date": ""
         }
@@ -61,6 +63,35 @@ class ExchangeScraper:
 
             self.data["euro"] = self._clean_number(extract_val("euro"))
             self.data["dolar"] = self._clean_number(extract_val("dolar"))
+
+            try:
+                # Intentamos buscar la etiqueta oculta de Drupal que usa el BCV (suele tener el formato YYYY-MM-DD)
+                fecha_elemento = soup.find("span", class_="date-display-single")
+                if fecha_elemento and fecha_elemento.has_attr("content"):
+                    self.data["fecha_bcv"] = fecha_elemento["content"].split("T")[0]
+                else:
+                    # Si falla, buscamos textualmente "Fecha Valor:" y decodificamos el texto
+                    texto_fecha = soup.find(string=re.compile("Fecha Valor:"))
+                    if texto_fecha:
+                        # Busca el patrón: "05 Mayo 2026"
+                        match = re.search(r'(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})', texto_fecha)
+                        if match:
+                            dia = match.group(1).zfill(2) # Rellena con 0 a la izquierda si es un solo dígito
+                            mes_str = match.group(2).capitalize()
+                            anio = match.group(3)
+                            
+                            # Diccionario para traducir el mes a número
+                            meses = {
+                                "Enero": "01", "Febrero": "02", "Marzo": "03", "Abril": "04",
+                                "Mayo": "05", "Junio": "06", "Julio": "07", "Agosto": "08",
+                                "Septiembre": "09", "Octubre": "10", "Noviembre": "11", "Diciembre": "12"
+                            }
+                            mes = meses.get(mes_str, "01") # Por defecto Enero si algo falla
+                            
+                            # Formateamos YYYY-MM-DD
+                            self.data["fecha_bcv"] = f"{anio}-{mes}-{dia}"
+            except Exception as e:
+                print(f"Advertencia: No se pudo extraer la Fecha Valor del BCV: {e}")
 
         except Exception as e:
             print(f"Error BCV: {e}")
@@ -205,33 +236,33 @@ def main():
     if scraper.data["dolar"] and scraper.data["euro"]:
         hist_data, sha_hist = storage.get_file("base_datos_bcv.json")
         
-        # Comprobar si el histórico existe y tiene registros
+        # Obtenemos la Fecha del BCV o, como respaldo, usamos la del servidor
+        fecha_registro = scraper.data.get("fecha_bcv") or current_date
+        
         if hist_data and isinstance(hist_data, list) and len(hist_data) > 0:
-            last_entry = hist_data[-1]  # Extraemos el último registro
+            last_entry = hist_data[-1]  
             last_dolar = last_entry.get("dolar")
             last_euro = last_entry.get("euro")
             
-            # Condición: ¿El precio extraído es diferente al último guardado?
             if scraper.data["dolar"] != last_dolar or scraper.data["euro"] != last_euro:
-                print(f"¡Nuevas tasas detectadas! Dólar: {scraper.data['dolar']} | Euro: {scraper.data['euro']}")
+                print(f"¡Nuevas tasas detectadas! Fecha BCV: {fecha_registro} | Dólar: {scraper.data['dolar']} | Euro: {scraper.data['euro']}")
                 
                 new_entry = {
-                    "fecha": current_date,
+                    "fecha": fecha_registro,
                     "dolar": scraper.data["dolar"],
                     "euro": scraper.data["euro"],
-                    "usdt": None  # Lo mantenemos en None según la base de datos
+                    "usdt": None  
                 }
                 
                 hist_data.append(new_entry)
-                storage.update_file("base_datos_bcv.json", hist_data, sha_hist, f"Auto-update: Histórico BCV añadido ({current_date})")
+                storage.update_file("base_datos_bcv.json", hist_data, sha_hist, f"Auto-update: Histórico BCV ({fecha_registro})")
             else:
                 print("Las tasas del BCV no han cambiado. Histórico intacto.")
                 
         elif hist_data is None:
-            # Si el archivo histórico no existe en GitHub, lo creamos con el primer dato
-            print("Archivo histórico no encontrado. Creando uno nuevo...")
+            print(f"Archivo histórico no encontrado. Creando uno nuevo con fecha {fecha_registro}...")
             new_entry = {
-                "fecha": current_date,
+                "fecha": fecha_registro,
                 "dolar": scraper.data["dolar"],
                 "euro": scraper.data["euro"],
                 "usdt": None
