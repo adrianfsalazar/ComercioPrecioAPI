@@ -1,10 +1,10 @@
 {
   "dolar": 530.5047,
   "euro": 615.50216303,
-  "usdt": 718.6,
-  "usdt_promedio_compra": 720.49,
-  "usdt_promedio_venta": 709.34,
+  "usdt": 718.0,
+  "usdt_promedio_compra": 720.87,
+  "usdt_promedio_venta": 710.95,
   "fecha_bcv": "2026-05-25",
-  "timestamp": 1779483156.1637566,
-  "human_date": "2026-05-22 20:52:41"
+  "timestamp": 1779484286.9831872,
+  "human_date": "2026-05-22 21:11:31"
 }
