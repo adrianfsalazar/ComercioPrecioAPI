@@ -2,13 +2,22 @@ name: Actualizar Tasas de Cambio
 
 on:
   schedule:
-    # Ejecutar cada 4 horas (minuto 0 de las horas 0, 4, 8, etc.)
-    - cron: '*/30 * * * *'
+    # Cada 4 horas, en el minuto 0 (00:00, 04:00, 08:00... UTC).
+    #
+    # Decía eso mismo en el comentario y el cron ponía '*/30 * * * *', que es
+    # cada MEDIA hora: 48 ejecuciones al día en vez de 6. Eso se comió la cuota
+    # gratuita de Actions de la cuenta (2.139 minutos en septiembre, sobre los
+    # 2.000 incluidos) y dejó bloqueados los workflows de los repos privados.
+    - cron: '0 */4 * * *'
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
+    # Una ejecución tarda ~20 segundos. Sin tope, el de GitHub son 6 HORAS: un
+    # scraper colgado contra una web que no responde se llevaría por delante
+    # una quinta parte de la cuota mensual en un solo run.
+    timeout-minutes: 5
     permissions:
       contents: write # Permiso clave para que el GITHUB_TOKEN pueda hacer push
 
