@@ -2,13 +2,13 @@ name: Actualizar Tasas de Cambio
 
 on:
   schedule:
-    # Cada 4 horas, en el minuto 0 (00:00, 04:00, 08:00... UTC).
+    # Cada 4 horas, en el minuto 17 (00:17, 04:17, 08:17... UTC).
     #
     # Decía eso mismo en el comentario y el cron ponía '*/30 * * * *', que es
     # cada MEDIA hora: 48 ejecuciones al día en vez de 6. Eso se comió la cuota
     # gratuita de Actions de la cuenta (2.139 minutos en septiembre, sobre los
     # 2.000 incluidos) y dejó bloqueados los workflows de los repos privados.
-    - cron: '0 */4 * * *'
+    - cron: '17 */4 * * *'
   workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions
 
 jobs:
